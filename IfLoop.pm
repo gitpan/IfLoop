@@ -20,7 +20,7 @@ use Text::Balanced;
 #our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 #our @EXPORT = qw();
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 our $DEBUG   = 0;
 
 # Helps tell us about where in the file we are.
@@ -116,10 +116,9 @@ sub filter_blocks
 
     my $keyword = '';
 
-    while($source =~ m/(\n*)(\s*)(elsifwhile)\b(?=\s*[(])(?{$keyword = $3})/gc ||
-          $source =~ m/(\n*)(\s*)(ifwhile)\b(?=\s*[(])(?{$keyword = $3})/gc    ||
-          $source =~ m/(\n*)(\s*)(elsifuntil)\b(?=\s*[(])(?{$keyword = $3})/gc ||
-          $source =~ m/(\n*)(\s*)(ifuntil)\b(?=\s*[(])(?{$keyword = $3})/gc )
+    while($source =~ m/(\n*)(\s*)((elsif|if)until)\b(?=\s*[(])(?{$keyword = $3})/gc || 
+          $source =~ m/(\n*)(\s*)((elsif|if)while)\b(?=\s*[(])(?{$keyword = $3})/gc )
+         
     {
 	my $r_fctn;
 	my %args = (self     => $self,
@@ -132,7 +131,7 @@ sub filter_blocks
 	    no strict 'refs';
 	    my $base_keyword = $1;
 
-	    next if(!$self->{$base_keyword});
+	    next if(!$self->{$base_keyword} || !$base_keyword);
 	    $r_fctn = \&{${base_keyword}.'_key'};
 	}
 
@@ -154,6 +153,7 @@ sub while_until_key
     my $line     = $r_args->{line};
     my $keyword  = $r_args->{keyword}; 
     
+    pos $$r_source =  pos($$r_source);
     
     my @pos = Text::Balanced::_match_codeblock($r_source,
 					       qr/\s*/,
@@ -161,16 +161,21 @@ sub while_until_key
 					       qr/[{(]/,qr/[)}]/,
 					       undef);
     
-    print STDERR "|@pos|"                                              if($DEBUG);
+    #Capture \G so that if we encounter comments 
+    # in the chain we can reset and go back for another pass.
+    my $pos_G = pos $$r_source;
+
+    print STDERR "|@pos|\n"                                            if($DEBUG);
     print STDERR substr($$r_source,$pos[0]-10,$pos[4]-$pos[0]+10),"\n" if($DEBUG);
     
     #substr($source,$pos[0]-10,$pos[4]-$pos[0]+10) #grabs elsewhile(...);
     #substr($source,$pos[0],$pos[4]-$pos[0])       #grabs (...);
     
     my $bool_condition = substr($$r_source,$pos[0],$pos[4]-$pos[0]);
-    my @replace=($pos[0]-7);
-    my $text = 'if';
+    my @replace=($pos[0]-7); #default replace starting place for an "if"
+    my $text = 'if';         #default replacement for an "if"
     
+    #change the @replace array and the $text if the statement is not an "if"
     if($keyword =~ m/elsif.*/)
     {
 	$text  = "elsif";
@@ -185,20 +190,20 @@ sub while_until_key
     #Adjust the syntax of the if to account for until. HA!
     if($keyword =~ m/.*until/){$text .= "(!$bool_condition)\{do";}
     else                      {$text .= "$bool_condition\{do";   }
-    
+ 
     @pos = Text::Balanced::_match_codeblock($r_source,
 					    qr/\s*/,
 					    qr/\{/,qr/\}/,
 					    qr/\{/,qr/\}/,
 					    undef);
-    print STDERR "|@pos|"                                          if($DEBUG);
+    print STDERR "|@pos|\n"                                        if($DEBUG);
     print STDERR substr($$r_source,$pos[0],$pos[4]-$pos[0]),"\n"   if($DEBUG);
     
-    #Check to make sure the syntax is "if*(){code}" not "code if*();" 
+    #If no positions are present then we must be doing the comment thing... 
     if(scalar @pos)
     {
 	my $inner = substr($$r_source,$pos[0],$pos[4]-$pos[0]);
-	
+  
 	push @replace, ($pos[4]-$pos[0])+$pos[0];
 	
 	#Allow N number of nests for the syntax.
@@ -218,17 +223,11 @@ sub while_until_key
 	
 	substr($$r_source,$replace[0],$replace[1]-$replace[0],$text);
     }
-    elsif($keyword =~ m/if.*/) #It is one of those backward things!
-    {
-	die "Cannot use \"$&\" in one-liner if. Use $&(...){} intead.\n";
-    }
     else
-    {
-	die "Parse Error. LALALALALA... go away, go away!\n\n".
-            "If you're seeing this it means the module has a bug.\n".
-            "Please contact the author with the code that caused this error.\n".
-	    "Thank you.\n";
+    { 
+	pos $$r_source = $pos_G;
     }
+
 }# End fctn while_until_key;
 
 
@@ -237,7 +236,7 @@ __END__
 
 =head1 NAME
 
-IfLoop - Perl extension for the if-elsif-else syntax in Perl.
+IfLoop - An extension to the if-elsif-else syntax in Perl.
 
 =head1 SYNOPSIS
 
@@ -276,7 +275,7 @@ IfLoop allows for the creation of if-elsif-else chains that contain loop structu
  {
      #code...
  }
- elsifuntil(C)
+ elsifwhile(C)
  {
      #code...
  }
@@ -319,7 +318,7 @@ translates to:
      }until(A)
  }
 
-Translation of elsif statments occurs in the same way.
+Translation of elsif statments occur in the same way.
 
 =head1 TODO
 
@@ -328,14 +327,20 @@ Translation of elsif statments occurs in the same way.
 =item 
 Add the B<for> and B<foreach> syntax.
 
-=item
-For completeness, make the B<code ifwhile(A);> syntax work.
-
 =back
 
-=head1 BUGS
+=head1 BUGS/QUIRKS
 
-None known
+=over 2
+
+=item
+The syntax B<code ifwhile(A);> does not work.
+(No explicit warning from module, but Perl complains of a bareword
+on the offending line.)
+
+=item
+When using <>'s to set $_ in a loop it must be done explicitly.
+(IfLoop will die with a warning that suggests the proper usage.)
 
 =head1 AUTHOR
 
@@ -349,9 +354,9 @@ IfLoop's implementation was heavily inspired by Damian Conway's Switch.pm.
 
 =head1 COPYRIGHT AND LICENCE
 
-Copyright (c) 2003, Brandon Willis. All Rights Reserved.
-This module is free software. It may be used, redistributed
-and/or modified under the same terms as Perl itself.
+ Copyright (c) 2003, Brandon Willis. All Rights Reserved.
+ This module is free software. It may be used, redistributed
+ and/or modified under the same terms as Perl itself.
 
 =head1 SEE ALSO
 
@@ -364,6 +369,10 @@ L<perl>.
 =item 0.02
 
 Initial Release 
+
+=item 0.03
+
+doc/code clean-up Fixed comment bug.
 
 =back
 

@@ -1,7 +1,7 @@
-IfLoop version 0.01
+IfLoop version 0.03
 ===================
 
-IfLoop --- Add loop constructs to the if-elsif-else chain.
+IfLoop --- Add loop constructs to the if-elsif-else chain syntax.
 
 IfLoop allows the syntax 
 if( A )
